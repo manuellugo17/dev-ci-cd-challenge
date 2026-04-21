@@ -15,9 +15,9 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4.3.0
         with:
           node-version: 20
           cache: npm
@@ -32,7 +32,7 @@ jobs:
         if: failure()
         run: npm test 2>&1 | tee logs/pipeline_failure.log || true
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4.6.2
         if: failure()
         with:
           name: failure-logs
@@ -43,7 +43,7 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
       - name: Build image
         run: docker build -t dev-cicd-challenge:${{ github.sha }} .
@@ -65,7 +65,7 @@ jobs:
       - name: Export image
         run: docker save dev-cicd-challenge:${{ github.sha }} -o image.tar
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4.6.2
         with:
           name: docker-image
           path: image.tar
@@ -76,7 +76,7 @@ jobs:
     runs-on: self-hosted
     if: startsWith(github.ref, 'refs/tags/v') && contains(github.ref, '-rc')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
       - name: Build and tag staging
         run: |
@@ -101,7 +101,7 @@ jobs:
     runs-on: self-hosted
     if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-rc')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
       - name: Backup current image
         run: |
@@ -143,13 +143,13 @@ jobs:
     if: failure()
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4.3.0
         with:
           node-version: 20
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4.2.1
         with:
           name: failure-logs
           path: logs/
@@ -159,7 +159,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4.6.2
         with:
           name: incident-report
           path: artifacts/
