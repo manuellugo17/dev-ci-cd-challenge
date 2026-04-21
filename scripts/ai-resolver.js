@@ -3,59 +3,81 @@ const path = require('path');
 
 const logPath = process.argv[2]
   || path.join(__dirname, '..', 'logs', 'pipeline_failure.log');
-const outputPath = path.join(__dirname, '..', 'artifacts', 'incident_report.md');
-const outputJsonPath = outputPath.replace('.md', '.json');
 
-// ── Análisis local (sin IA) como fallback ──────────────────────────
+const outputDir = path.join(__dirname, '..', 'artifacts');
+const outputMd   = path.join(outputDir, 'incident_report.md');
+const outputJson = path.join(outputDir, 'incident_report.json');
+
+// ── Análisis local sin IA ──────────────────────────────────────────
 function analyzeLocally(logContent) {
   const lower = logContent.toLowerCase();
 
   if (lower.includes('expected: 200') && lower.includes('received: 500')) {
     return {
-      step_failed: 'Unit Tests',
-      probable_cause: 'El endpoint /health devuelve 500 porque APP_ENV no está definida en el ambiente de tests.',
-      confidence: 'High',
+      timestamp: new Date().toISOString(),
+      step_failed: 'unit_tests',
+      probable_cause: 'El endpoint /health retorna 500 cuando APP_ENV no está definida. El entorno de tests no tenía esa variable configurada.',
+      confidence: 'high',
       severity: 'medium',
-      suggested_fix: 'Agregar APP_ENV=test en el beforeAll() del archivo de tests, o configurarlo en el workflow.',
+      suggested_fix: 'Definir APP_ENV=test en el beforeAll() del archivo de tests o en las variables de entorno del workflow.',
       rollback_required: false,
-      recommended_action: 'Corregir el archivo de tests y volver a correr el pipeline.'
+      recommended_action: 'Corregir la configuración del entorno de tests y volver a correr el pipeline.',
+      source: 'local_analysis'
     };
   }
 
-  if (lower.includes('connection refused') || lower.includes('econnrefused')) {
+  if (lower.includes('econnrefused') || lower.includes('connection refused')) {
     return {
-      step_failed: 'Health Check / Smoke Test',
-      probable_cause: 'El contenedor no arrancó correctamente o está en el puerto equivocado.',
-      confidence: 'High',
+      timestamp: new Date().toISOString(),
+      step_failed: 'health_check',
+      probable_cause: 'El contenedor no está escuchando en el puerto esperado o no llegó a arrancar correctamente.',
+      confidence: 'high',
       severity: 'high',
-      suggested_fix: 'Verificar que el Dockerfile expone el puerto correcto y que APP_ENV está configurada.',
+      suggested_fix: 'Verificar que el Dockerfile expone el puerto correcto y que la variable PORT está definida.',
       rollback_required: true,
-      recommended_action: 'Revisar logs del contenedor con: docker logs app-staging'
+      recommended_action: 'Revisar logs del contenedor con docker logs app-staging y corregir la configuración de puertos.',
+      source: 'local_analysis'
+    };
+  }
+
+  if (lower.includes('npm err') || lower.includes('npm error')) {
+    return {
+      timestamp: new Date().toISOString(),
+      step_failed: 'build',
+      probable_cause: 'Error en la instalación de dependencias npm. Puede ser un package-lock.json faltante o una versión incompatible.',
+      confidence: 'medium',
+      severity: 'medium',
+      suggested_fix: 'Verificar que package-lock.json está commiteado y que las versiones de Node y npm son compatibles.',
+      rollback_required: false,
+      recommended_action: 'Correr npm install localmente, commitear el package-lock.json generado y volver a pushear.',
+      source: 'local_analysis'
     };
   }
 
   return {
-    step_failed: 'Desconocido',
+    timestamp: new Date().toISOString(),
+    step_failed: 'unknown',
     probable_cause: 'No se pudo determinar la causa raíz con los logs disponibles.',
-    confidence: 'Low',
+    confidence: 'low',
     severity: 'medium',
-    suggested_fix: 'Revisar los logs del pipeline manualmente.',
+    suggested_fix: 'Revisar los logs completos del pipeline en GitHub Actions.',
     rollback_required: false,
-    recommended_action: 'Inspeccionar los logs en la pestaña Actions de GitHub.'
+    recommended_action: 'Inspeccionar manualmente los logs de cada job en la pestaña Actions de GitHub.',
+    source: 'local_analysis'
   };
 }
 
-// ── Análisis con la API de Claude ─────────────────────────────────
+// ── Análisis con Claude API ────────────────────────────────────────
 async function analyzeWithAI(logContent) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
 
   if (!apiKey) {
-    console.log('No se encontró ANTHROPIC_API_KEY — usando análisis local...');
+    console.log('ANTHROPIC_API_KEY no configurada, usando análisis local.');
     return analyzeLocally(logContent);
   }
 
   try {
-    console.log('Llamando a la API de Claude para analizar el incidente...');
+    console.log('Analizando con Claude API...');
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -68,19 +90,22 @@ async function analyzeWithAI(logContent) {
         max_tokens: 1000,
         messages: [{
           role: 'user',
-          content: `Sos un experto en CI/CD y DevOps. Analizá estos logs de falla de un pipeline y devolvé SOLO un objeto JSON (sin texto extra, sin backticks, sin markdown):
+          content: `Analizá estos logs de falla de un pipeline CI/CD y devolvé SOLO un objeto JSON sin texto extra ni backticks.
 
+Logs:
 ${logContent}
 
-Devolvé exactamente esta estructura JSON:
+Devolvé exactamente esta estructura:
 {
-  "step_failed": "nombre del paso que falló",
-  "probable_cause": "explicación detallada de qué salió mal",
-  "confidence": "High o Medium o Low",
+  "timestamp": "${new Date().toISOString()}",
+  "step_failed": "nombre_del_paso_en_snake_case",
+  "probable_cause": "explicación clara en una o dos oraciones",
+  "confidence": "high o medium o low",
   "severity": "critical o high o medium o low",
-  "suggested_fix": "pasos concretos para solucionar el problema",
+  "suggested_fix": "pasos concretos para resolver el problema",
   "rollback_required": true o false,
-  "recommended_action": "qué hacer a continuación"
+  "recommended_action": "qué hacer a continuación",
+  "source": "claude_api"
 }`
         }]
       })
@@ -92,48 +117,40 @@ Devolvé exactamente esta estructura JSON:
 
     return JSON.parse(text);
   } catch (err) {
-    console.error('Error llamando a la API, usando análisis local:', err.message);
+    console.error('Error con Claude API, usando análisis local:', err.message);
     return analyzeLocally(logContent);
   }
 }
 
-// ── Generar el reporte en Markdown ────────────────────────────────
-function generateMarkdown(analysis) {
-  const icons = { critical: '🔴', high: '🟠', medium: '🟡', low: '🟢' };
-  const icon = icons[analysis.severity] || '⚪';
+// ── Generar markdown legible pero natural ─────────────────────────
+function generateMarkdown(r) {
+  const severityLabel = { critical: 'critical', high: 'high', medium: 'medium', low: 'low' };
+  const rollback = r.rollback_required ? 'yes' : 'no';
 
   return `# Incident Report
 
-**Generado:** ${new Date().toISOString()}
+generated: ${r.timestamp}
+source: ${r.source}
 
----
+## What happened
 
-## Resumen
+Step failed: ${r.step_failed}
+Severity: ${severityLabel[r.severity] || r.severity}
+Confidence: ${r.confidence}
 
-| Campo | Valor |
-|---|---|
-| **Paso fallido** | ${analysis.step_failed} |
-| **Severidad** | ${icon} ${analysis.severity.toUpperCase()} |
-| **Confianza del análisis** | ${analysis.confidence} |
-| **Rollback requerido** | ${analysis.rollback_required ? '✅ SÍ' : '❌ No'} |
+## Root cause
 
----
+${r.probable_cause}
 
-## Causa probable
+## How to fix it
 
-${analysis.probable_cause}
+${r.suggested_fix}
 
----
+## Next steps
 
-## Cómo solucionarlo
+${r.recommended_action}
 
-${analysis.suggested_fix}
-
----
-
-## Acción recomendada
-
-${analysis.recommended_action}
+rollback required: ${rollback}
 `;
 }
 
@@ -142,22 +159,27 @@ async function main() {
   let logContent = '';
   try {
     logContent = fs.readFileSync(logPath, 'utf8');
-    console.log(`Logs leídos desde: ${logPath}`);
+    console.log(`Reading logs from: ${logPath}`);
   } catch {
-    console.log('No se encontró archivo de logs, usando mensaje genérico.');
+    console.log('Log file not found, using generic message.');
     logContent = 'Pipeline failed. No detailed logs available.';
   }
 
-  const analysis = await analyzeWithAI(logContent);
-  const markdown = generateMarkdown(analysis);
+  const result = await analyzeWithAI(logContent);
 
-  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  fs.writeFileSync(outputPath, markdown);
-  fs.writeFileSync(outputJsonPath, JSON.stringify(analysis, null, 2));
+  fs.mkdirSync(outputDir, { recursive: true });
 
-  console.log(`\nReporte generado en: ${outputPath}`);
-  console.log('\n══ PREVIEW DEL REPORTE ══');
-  console.log(markdown);
+  // JSON para Grafana / Elastic
+  fs.writeFileSync(outputJson, JSON.stringify(result, null, 2));
+
+  // Markdown legible para humanos
+  fs.writeFileSync(outputMd, generateMarkdown(result));
+
+  console.log(`\nReport saved to:`);
+  console.log(`  ${outputJson}`);
+  console.log(`  ${outputMd}`);
+  console.log('\n--- JSON output ---');
+  console.log(JSON.stringify(result, null, 2));
 }
 
 main().catch(console.error);
