@@ -1,208 +1,142 @@
-name: CI/CD Pipeline
+name: Pipeline CI/CD
 
 on:
   push:
-    branches: [main]
+    branches: [ "main" ]
   pull_request:
 
 jobs:
 
-  # ══════════════════════════════════════════
-  # JOB 1 — Tests (corre en GitHub)
-  # ══════════════════════════════════════════
-  test:
-    name: Run Tests
+  pruebas:
+    name: Ejecutar Tests
     runs-on: ubuntu-latest
-    steps:
 
-      - name: Descargar el código
+    steps:
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Instalar Node.js 20
+      - name: Instalar Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
       - name: Instalar dependencias
         run: npm ci
 
-      - name: Correr los tests
+      - name: Ejecutar tests
         run: npm test
         env:
           APP_ENV: test
 
-      - name: Guardar log de falla
+      - name: Guardar logs si falla
         if: failure()
         run: |
           mkdir -p logs
-          npm test 2>&1 | tee logs/pipeline_failure.log || true
+          echo "Test failure" > logs/pipeline_failure.log
 
-      - name: Subir log como artefacto
+      - name: Subir logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: failure-logs
           path: logs/
 
-  # ══════════════════════════════════════════
-  # JOB 2 — Build y Deploy Staging
-  # (corre directo en tu VM via self-hosted runner)
-  # ══════════════════════════════════════════
-  deploy-staging:
-    name: Deploy to Staging
-    needs: test
+  deploy_staging:
+    name: Deploy a Staging
     runs-on: self-hosted
-    steps:
+    needs: pruebas
 
-      - name: Descargar el código
+    steps:
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Construir imagen Docker
+      - name: Build imagen
         run: docker build -t dev-cicd-challenge:${{ github.sha }} .
 
-      - name: Probar que el contenedor arranca bien
+      - name: Test rápido contenedor
         run: |
-          docker run -d \
-            --name prueba-${{ github.sha }} \
-            -p 3099:3001 \
-            -e APP_ENV=test \
-            -e PORT=3001 \
-            dev-cicd-challenge:${{ github.sha }}
-          sleep 4
+          docker run -d -p 3099:3001 --name test_container dev-cicd-challenge:${{ github.sha }}
+          sleep 5
           curl -f http://localhost:3099/health
-          docker stop prueba-${{ github.sha }}
-          docker rm prueba-${{ github.sha }}
+          docker rm -f test_container
 
-      - name: Taggear como staging
-        run: |
-          docker tag dev-cicd-challenge:${{ github.sha }} \
-            dev-cicd-challenge:staging
+      - name: Tag staging
+        run: docker tag dev-cicd-challenge:${{ github.sha }} dev-cicd-challenge:staging
 
-      - name: Reiniciar contenedor staging
+      - name: Deploy staging
         run: |
           cd ~/challenge/app
-          docker compose stop staging  || true
+          docker compose stop staging || true
           docker compose rm -f staging || true
           docker compose up -d staging
-          echo "Staging deployado OK"
 
-      - name: Smoke test staging
-        run: |
-          sleep 5
-          response=$(curl -s -o /dev/null -w "%{http_code}" \
-            http://localhost:3001/health)
-          echo "Staging respondió HTTP $response"
-          if [ "$response" != "200" ]; then
-            echo "SMOKE TEST FALLIDO"
-            exit 1
-          fi
-          echo "SMOKE TEST OK"
+      - name: Health check staging
+        run: curl -f http://localhost:3001/health
 
-  # ══════════════════════════════════════════
-  # JOB 3 — Deploy Producción + Rollback
-  # (corre directo en tu VM via self-hosted runner)
-  # ══════════════════════════════════════════
-  deploy-production:
-    name: Deploy to Production
-    needs: deploy-staging
+  deploy_produccion:
+    name: Deploy a Producción
     runs-on: self-hosted
+    needs: deploy_staging
+
     steps:
-
-      - name: Guardar versión anterior para rollback
-        run: |
-          docker tag dev-cicd-challenge:production \
-            dev-cicd-challenge:rollback 2>/dev/null || true
-
-      - name: Activar nueva versión en producción
-        run: |
-          docker tag dev-cicd-challenge:${{ github.sha }} \
-            dev-cicd-challenge:production
-          echo "${{ github.sha }}" > ~/challenge/app/rollback/last-sha.txt
-
-      - name: Reiniciar contenedor producción
-        run: |
-          cd ~/challenge/app
-          docker compose stop production  || true
-          docker compose rm -f production || true
-          docker compose up -d production
-          echo "Producción deployada OK"
-
-      - name: Health check producción
-        id: healthcheck
-        run: |
-          sleep 5
-          response=$(curl -s -o /dev/null -w "%{http_code}" \
-            http://localhost:3002/health)
-          echo "Producción respondió HTTP $response"
-          if [ "$response" != "200" ]; then
-            echo "HEALTH CHECK FALLIDO"
-            exit 1
-          fi
-          echo "HEALTH CHECK OK"
-
-      - name: Rollback automático si falló
-        if: failure()
-        run: |
-          echo "INICIANDO ROLLBACK..."
-          cd ~/challenge/app
-          docker tag dev-cicd-challenge:rollback \
-            dev-cicd-challenge:production 2>/dev/null || true
-          docker compose stop production  || true
-          docker compose rm -f production || true
-          docker compose up -d production
-          echo "ROLLBACK COMPLETADO"
-
-  # ══════════════════════════════════════════
-  # JOB 4 — AI Resolver (solo si algo falló)
-  # ══════════════════════════════════════════
-  ai-resolver:
-    name: AI Incident Resolver
-    needs: [test, deploy-staging, deploy-production]
-    if: failure()
-    runs-on: ubuntu-latest
-    steps:
-
-      - name: Descargar el código
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Instalar Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
+      - name: Backup imagen actual
+        run: docker tag dev-cicd-challenge:production dev-cicd-challenge:rollback || true
 
-      - name: Descargar logs de falla
+      - name: Tag producción
+        run: docker tag dev-cicd-challenge:${{ github.sha }} dev-cicd-challenge:production
+
+      - name: Guardar SHA rollback
+        run: |
+          mkdir -p ~/challenge/app/rollback
+          echo "${{ github.sha }}" > ~/challenge/app/rollback/last-sha.txt
+
+      - name: Deploy producción
+        run: |
+          cd ~/challenge/app
+          docker compose stop production || true
+          docker compose rm -f production || true
+          docker compose up -d production
+
+      - name: Health check producción
+        run: |
+          sleep 5
+          curl -f http://localhost:3002/health
+
+      - name: Rollback si falla
+        if: failure()
+        run: |
+          docker tag dev-cicd-challenge:rollback dev-cicd-challenge:production
+          cd ~/challenge/app
+          docker compose stop production || true
+          docker compose rm -f production || true
+          docker compose up -d production
+
+  resolver_ia:
+    name: Resolver Incidentes con IA
+    runs-on: ubuntu-latest
+    if: failure()
+    needs: [pruebas, deploy_staging, deploy_produccion]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Descargar logs
         uses: actions/download-artifact@v4
         with:
           name: failure-logs
           path: logs/
-        continue-on-error: true
 
-      - name: Correr el AI Resolver
-        run: node scripts/ai-resolver.js
+      - name: Ejecutar resolver
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: node scripts/ai-resolver.js
 
       - name: Subir reporte
         uses: actions/upload-artifact@v4
         with:
           name: incident-report
           path: artifacts/
-
-      - name: Comentar en PR
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            try {
-              const report = fs.readFileSync('artifacts/incident_report.md', 'utf8');
-              github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: `## 🤖 AI Incident Report\n\n${report}`
-              });
-            } catch(e) {
-              console.log('No se pudo comentar:', e.message);
-            }
