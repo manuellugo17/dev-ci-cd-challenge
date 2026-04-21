@@ -1,20 +1,8 @@
-FAIL __tests__/app.test.js
-  GET /health
-    ✕ should return 200 and status ok (24 ms)
-
-  ● GET /health › should return 200 and status ok
-
-    expect(received).toBe(expected) // Object.is equality
-
-    Expected: 200
-    Received: 500
-
-      6 |     const response = await request(app).get('/health');
-      7 |
-    > 8 |     expect(response.statusCode).toBe(200);
-        |                                 ^
-      9 |     expect(response.body.status).toBe('ok');
-     10 |   });
-     11 | });
-
-Jest: Test suite failed, 1 total
+Run npm ci
+npm error code EUSAGE
+npm error
+npm error The `npm ci` command can only install with an existing package-lock.json or
+npm error npm-shrinkwrap.json with lockfileVersion >= 1. Run an install with npm@5 or
+npm error later to generate a package-lock.json file, then try again.
+npm error A complete log of this run can be found in: /root/.npm/_logs/debug-0.log
+The command '/bin/sh -c npm ci' returned a non-zero code: 1
