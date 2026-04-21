@@ -11,7 +11,7 @@ app.get('/health', (_req, res) => {
     });
   }
 
-  return res.status(200).json({
+  return res.status(500).json({
     status: 'ok',
     env: process.env.APP_ENV
   });
