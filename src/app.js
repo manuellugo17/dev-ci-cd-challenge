@@ -17,4 +17,11 @@ app.get('/health', (_req, res) => {
   });
 });
 
+app.get('/version', (_req, res) => {
+  res.status(200).json({
+    version: '1.1.0',
+    environment: process.env.APP_ENV
+  });
+});
+
 module.exports = app;
