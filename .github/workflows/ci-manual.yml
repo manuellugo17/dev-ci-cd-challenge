@@ -1,14 +1,7 @@
-name: CI/CD Pipeline
+name: CI/CD Pipeline (manual approval)
 
 on:
-  push:
-    branches:
-      - main
-    tags:
-      - 'v*'
-  pull_request:
-    branches:
-      - main
+  workflow_dispatch:
 
 jobs:
   test:
@@ -35,7 +28,7 @@ jobs:
       - uses: actions/upload-artifact@v4.6.2
         if: failure()
         with:
-          name: failure-logs
+          name: failure-logs-manual
           path: logs/
 
   build:
@@ -50,7 +43,7 @@ jobs:
 
       - name: Smoke test image
         run: |
-          docker run -d --name temp -p 3001:3001 \
+          docker run -d --name temp-manual -p 3001:3001 \
             -e APP_ENV=test -e PORT=3001 \
             dev-cicd-challenge:${{ github.sha }}
           for i in $(seq 1 10); do
@@ -60,21 +53,12 @@ jobs:
             echo "Attempt $i failed, retrying..."
           done
           [ "$response" = "200" ] || exit 1
-          docker rm -f temp
-
-      - name: Export image
-        run: docker save dev-cicd-challenge:${{ github.sha }} -o image.tar
-
-      - uses: actions/upload-artifact@v4.6.2
-        with:
-          name: docker-image
-          path: image.tar
+          docker rm -f temp-manual
 
   deploy-staging:
     name: Deploy staging
     needs: build
     runs-on: self-hosted
-    if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4.2.2
 
@@ -84,7 +68,7 @@ jobs:
       - name: Deploy
         run: |
           cd ~/challenge/app
-          export STAGING_TAG=main-${{ github.sha }}
+          export STAGING_TAG=manual-${{ github.sha }}
           docker compose stop staging || true
           docker compose rm -f staging || true
           docker compose up -d staging
@@ -99,7 +83,7 @@ jobs:
     name: Deploy production
     needs: deploy-staging
     runs-on: self-hosted
-    if: github.ref == 'refs/heads/main'
+    environment: production
     steps:
       - uses: actions/checkout@v4.2.2
 
@@ -114,11 +98,11 @@ jobs:
       - name: Deploy
         run: |
           cd ~/challenge/app
-          export PROD_TAG=main-${{ github.sha }}
+          export PROD_TAG=manual-${{ github.sha }}
           docker compose stop production || true
           docker compose rm -f production || true
           docker compose up -d production
-          echo "main-${{ github.sha }}" > ~/challenge/app/rollback/last-tag.txt
+          echo "manual-${{ github.sha }}" > ~/challenge/app/rollback/last-tag.txt
 
       - name: Health check
         id: healthcheck
@@ -151,7 +135,7 @@ jobs:
 
       - uses: actions/download-artifact@v4.2.1
         with:
-          name: failure-logs
+          name: failure-logs-manual
           path: logs/
         continue-on-error: true
 
@@ -161,19 +145,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4.6.2
         with:
-          name: incident-report
+          name: incident-report-manual
           path: artifacts/
-
-      - name: Comment on PR
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const report = fs.readFileSync('artifacts/incident_report.md', 'utf8');
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `## AI Incident Report\n\n${report}`
-            });
