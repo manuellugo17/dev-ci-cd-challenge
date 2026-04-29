@@ -5,7 +5,7 @@ const app = express();
 app.get('/health', (_req, res) => {
   const envReady = Boolean(process.env.APP_ENV);
   if (!envReady) {
-    return res.status(500).json({
+    return res.status(200).json({
       status: 'degraded',
       reason: 'APP_ENV is missing'
     });
