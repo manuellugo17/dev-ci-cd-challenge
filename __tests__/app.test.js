@@ -2,7 +2,7 @@ const request = require('supertest');
 const app = require('../src/app');
 
 beforeAll(() => {
-  process.env.APP_ENV = 'test';
+  process.env.APP_ENV = 'wrong_value';
 });
 
 afterAll(() => {
