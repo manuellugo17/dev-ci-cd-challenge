@@ -177,3 +177,46 @@ jobs:
               repo: context.repo.repo,
               body: `## AI Incident Report\n\n${report}`
             });
+
+      - name: Read incident report for email
+        id: read-report
+        run: |
+          REPORT=$(cat artifacts/incident_report.md)
+          # Escapar saltos de línea para pasarlo como variable de entorno
+          echo "REPORT_CONTENT<<EOF" >> $GITHUB_OUTPUT
+          cat artifacts/incident_report.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          STEP=$(cat artifacts/incident_report.json | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('step_failed','unknown'))")
+          SEVERITY=$(cat artifacts/incident_report.json | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('severity','unknown'))")
+          echo "STEP_FAILED=$STEP" >> $GITHUB_OUTPUT
+          echo "SEVERITY=$SEVERITY" >> $GITHUB_OUTPUT
+
+      - name: Send failure email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          to: ${{ secrets.MAIL_TO }}
+          from: CI/CD Pipeline <${{ secrets.MAIL_USERNAME }}>
+          subject: "❌ Pipeline falló — Step: ${{ steps.read-report.outputs.STEP_FAILED }} | Severity: ${{ steps.read-report.outputs.SEVERITY }} | Repo: ${{ github.repository }}"
+          body: |
+            El pipeline de CI/CD falló en el repositorio ${{ github.repository }}.
+
+            Commit: ${{ github.sha }}
+            Branch: ${{ github.ref_name }}
+            Autor: ${{ github.actor }}
+            Pipeline: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            ────────────────────────────────────────
+            REPORTE DEL AI INCIDENT RESOLVER
+            ────────────────────────────────────────
+
+            ${{ steps.read-report.outputs.REPORT_CONTENT }}
+
+            ────────────────────────────────────────
+            Ver el reporte completo y los artefactos en:
+            https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
