@@ -1,290 +1,184 @@
+
 # Dev CI/CD + AI Incident Resolution Challenge
 
-Este challenge busca evaluar habilidades de **CI/CD, automatización, observabilidad y pensamiento operativo moderno**, incorporando un componente de **resolución de incidentes asistida por IA**.
-
-El objetivo no es solo construir un pipeline que funcione, sino demostrar cómo la **IA puede ayudar a diagnosticar y acelerar la resolución de fallas en pipelines o despliegues**.
+Pipeline CI/CD completo con deploy automatizado, rollback automático y resolución de incidentes asistida por IA sobre una API Node.js.
 
 ---
 
-## Contexto
+## Decisiones técnicas
 
-Este repositorio contiene una **API Node.js simple** que expone un endpoint:
+### Stack utilizado
 
-```http
-GET /health
+- **App:** Node.js + Express
+- **Tests:** Jest + Supertest
+- **CI/CD:** GitHub Actions con Self-Hosted Runner
+- **Infraestructura:** Docker + Docker Compose en VM Ubuntu (red privada)
+- **AI Resolver:** Claude API (Anthropic) con fallback local por patrones
+
+### Por qué Self-Hosted Runner
+
+La VM donde se despliega la aplicación está en una red privada empresarial sin IP pública. GitHub Actions no puede conectarse a ella por SSH desde internet. En lugar de exponer la VM con herramientas como ngrok (lo cual no es aceptable en infraestructura corporativa), instalé un Self-Hosted Runner directamente en la VM. El runner establece la conexión hacia GitHub desde adentro de la red, sin necesidad de abrir ningún puerto entrante.
+
+### Por qué Trunk Based Development con tags
+
+Adopté este modelo en lugar de Gitflow porque es más simple de mantener y refleja mejor cómo trabajan los equipos modernos. La lógica es:
+
+- cualquier push a `main` corre los tests y el build siempre
+- un push a `main` también dispara el deploy automático a staging
+- si staging pasa, el deploy a producción se ejecuta automáticamente a continuación
+- los tags `v*-p` están disponibles para el modelo alternativo donde producción requiere decisión manual
+
+---
+
+## Problemas encontrados y soluciones
+
+### Test fallando por dependencia de entorno
+
+El endpoint `/health` dependía de la variable de entorno `APP_ENV`.  
+Cuando esta no estaba definida, la API respondía con un estado no saludable.
+
+Para mejorar el comportamiento en entorno staging, se modificó el endpoint para retornar HTTP 200 con estado `degraded` en lugar de HTTP 500. Esto permite mantener los health checks operativos sin interrumpir el pipeline.
+
+Adicionalmente, se configuró `process.env.APP_ENV = 'test'` en el `beforeAll()` de los tests para asegurar un entorno controlado durante la ejecución.
+
+También se agregaron tests adicionales:
+- Verificación de que el campo `env` esté presente en la respuesta
+- Validación de que rutas inexistentes retornen HTTP 404
+
+### Dockerfile incompleto
+
+El Dockerfile original usaba un único stage y el puerto expuesto no coincidía con el que usa la aplicación.
+
+Solución: implementé un multi-stage build separando la instalación de dependencias de la imagen final, lo que reduce el tamaño considerablemente. Corregí el puerto a 3001 y agregué las variables de entorno necesarias.
+
+---
+
+## Arquitectura del pipeline
+
+```
+	1. Test
+		Instalación de dependencias con npm ci
+		Ejecución de tests en un entorno aislado (APP_ENV=test)
+		Validación básica de que la aplicación funciona correctamente antes de continuar
+	2. Build
+		Construcción de la imagen Docker de la aplicación
+		Ejecución de un smoke test levantando un contenedor temporal
+		Verificación de que la app inicia correctamente
+	3. Deploy a Staging
+		Despliegue en una VM mediante docker compose
+		La aplicación queda disponible en el puerto 3001
+		Se realiza un health check sobre el endpoint /health
+		El pipeline continúa solo si la respuesta es satisfactoria (HTTP 200)
+	4. Deploy a Producción
+		Despliegue en el entorno productivo (misma VM, puerto 3002)
+		Validación nuevamente del endpoint /health
+		En caso de fallo, se ejecuta un rollback automático a la versión anterior
+	5. Incident Report (en caso de error)
+		Se recolectan logs del job que falló
+		Se analizan automáticamente (IA o análisis local)
+		Se genera un reporte para facilitar el diagnóstico del problema
 ```
 
-El proyecto incluye:
-
-- una aplicación básica
-- un test que falla intencionalmente
-- una configuración mínima de CI/CD
-- un placeholder para un AI resolver
-- logs de ejemplo para análisis
-
-Tu tarea es:
-
-1. Construir un pipeline CI/CD completo
-2. Resolver los problemas actuales del proyecto
-3. Desplegar la aplicación
-4. Implementar un **mecanismo de diagnóstico automático asistido por IA cuando algo falla**
+En pull requests solo corren `test` y `build`, sin deploy.
 
 ---
 
-## Objetivos del challenge
+## Ambientes
 
-Queremos ver cómo diseñás sistemas que:
+Ambiente	Puerto	Imagen Docker
+Staging		3001	`dev-cicd-challenge:staging`
+Production	3002	`dev-cicd-challenge:production`
 
-- automaticen el ciclo de desarrollo
-- detecten fallas rápidamente
-- ayuden a resolver incidentes
-- minimicen impacto en producción
-- utilicen **IA para acelerar el diagnóstico**
+Los contenedores incluyen el SHA del commit en el nombre para identificar fácilmente qué versión está activa.
 
 ---
 
-## Requerimientos
+## Rollback automático
 
-### 1. CI Pipeline
-
-Implementar un pipeline que ejecute al hacer **push o pull request**.
-
-El pipeline debe incluir:
-
-- instalación de dependencias
-- ejecución de tests
-- build del proyecto
-- generación de artefactos
-
-Herramienta sugerida:
-
-- GitHub Actions (preferido)
-
-Pero podés usar cualquier enfoque razonable.
-
----
-
-### 2. Tests
-
-El repositorio contiene un test que actualmente **falla**.
-
-Esperamos que:
-
-- identifiques el problema
-- lo soluciones
-- agregues al menos **un test adicional**
-
----
-
-### 3. Dockerización
-
-Crear o corregir un `Dockerfile` que permita ejecutar la aplicación.
-
-El contenedor debe:
-
-- iniciar correctamente
-- exponer el puerto correcto
-- permitir correr el healthcheck
-
-Opcional pero valorado:
-
-- imagen liviana
-- multi-stage build
-
----
-
-### 4. Deploy a Staging
-
-Implementar un deploy automático a **staging** cuando el pipeline pasa.
-
-Puede ser en:
-
-- Railway
-- Render
-- Fly.io
-- Kubernetes
-- ECS
-- Docker Compose
-- cualquier alternativa razonable
-
-Debe existir un **health check automático**:
-
-```http
-GET /health
-```
-
----
-
-### 5. End-to-End / Smoke Test
-
-Luego del deploy a staging se debe ejecutar al menos un test de smoke.
-
-Ejemplo:
+Si el health check de producción falla, el pipeline ejecuta automáticamente:
 
 ```bash
-curl /health
+docker tag dev-cicd-challenge:rollback dev-cicd-challenge:production
+docker compose stop production
+docker compose up -d production
 ```
 
-Si falla, el pipeline debe marcar error.
+Antes de cada deploy a producción se guarda la imagen activa como `:rollback`, de modo que la restauración no depende de conectividad externa ni acceso al registry. El proceso tarda menos de 30 segundos.
 
 ---
 
-### 6. Deploy a Producción
+## Nota sobre puertos
 
-Si staging pasa correctamente:
+El contenedor Docker expone por defecto el puerto 3001. Los servicios de staging y production se levantan mediante `docker compose` en la VM, donde cada servicio redefine los puertos mapeados (staging → 3001, production → 3002). La imagen es la misma; el mapeo lo controla el compose file en la VM.
 
-- desplegar a producción
+## AI Incident Resolver
 
-Podés simular producción con otro environment.
+Cuando cualquier job del pipeline falla, el resolver:
 
----
+1. Descarga los logs guardados durante la ejecución
+2. Si hay `ANTHROPIC_API_KEY` configurada, los envía a Claude para análisis
+3. Si no hay key, aplica detección local por patrones de texto
+4. Genera dos archivos en `artifacts/`:
 
-### 7. Rollback automático
-
-Si el deploy de producción falla el health check:
-
-- ejecutar rollback automático
-- restaurar la versión anterior
-
----
-
-### 8. AI Incident Resolver
-
-Además del pipeline CI/CD, queremos que implementes un **componente que utilice IA para analizar fallas del pipeline o del deploy**.
-
-Este componente debe:
-
-1. Leer logs de fallas del pipeline
-2. Analizar posibles causas
-3. Generar un diagnóstico automático
-
-El objetivo es simular un **AI-assisted incident response system**.
-
----
-
-## Qué debería hacer el AI Resolver
-
-Cuando el pipeline falla:
-
-- recolectar logs
-- enviarlos a un modelo de IA
-- generar un resumen estructurado del incidente
-
-### Output esperado
-
-El sistema debe generar un archivo como:
-
-```text
-artifacts/incident_report.md
+```
+incident_report.md   → legible para humanos
+incident_report.json → estructurado para ingestión en sistemas de observabilidad
 ```
 
-o
+El JSON incluye los campos `step_failed`, `probable_cause`, `confidence`, `severity`, `suggested_fix`, `rollback_required` y `recommended_action`.
 
-```text
-artifacts/incident_report.json
+Patrones que detecta el análisis local:
+
+- HTTP 500 en tests → variable de entorno faltante en el entorno de tests
+- Connection refused → problema de puertos en el contenedor
+- npm error → package-lock.json faltante o versión incompatible
+- Docker error → falla en el deploy o configuración del compose
+
+### Bonus implementados
+
+- Comentario automático en Pull Requests con el reporte del incidente
+- Clasificación de severidad (`critical`, `high`, `medium`, `low`)
+- Detección automática de si se requiere rollback
+- Detección de errores comunes: puertos, variables de entorno, dependencias
+- Envío por mail del reporte cuando el pipeline falla (via Gmail SMTP)
+
+---
+
+## Notificación por mail
+
+Cuando el pipeline falla, el AI Resolver genera el reporte y lo envía automáticamente por correo con:
+
+- commit, branch y autor que disparó la falla
+- link directo al run de Actions
+- contenido completo del reporte de incidente
+
+Requiere configurar tres secrets en el repositorio: `MAIL_USERNAME`, `MAIL_PASSWORD` (contraseña de aplicación de Gmail) y `MAIL_TO`.
+
+---
+
+## Cómo correr localmente
+
+```bash
+npm install
+npm test
+APP_ENV=development node server.js
+curl http://localhost:3001/health
 ```
 
-Ejemplo:
+## Cómo correr con Docker
 
-```text
-Incident Summary
-
-Step failed:
-Unit Tests
-
-Probable root cause:
-The test expects the Express app to be exported but the server file starts the listener directly.
-
-Confidence:
-Medium
-
-Suggested fix:
-Export the Express app instance and move the listen() call to a separate file.
-
-Recommended action:
-Fix test setup and rerun pipeline.
-
-Rollback required:
-No
+```bash
+docker build -t dev-cicd-challenge .
+docker run -p 3001:3001 -e APP_ENV=production dev-cicd-challenge
+curl http://localhost:3001/health
 ```
 
+## Cómo deployar
+
+El deploy a staging es automático con cada push a `main`. 
 ---
 
-## Archivos incluidos
+## Mejoras posibles
 
-Este kit ya trae:
-
-- `src/app.js`
-- `server.js`
-- `__tests__/app.test.js`
-- `logs/pipeline_failure.log`
-- `scripts/ai-resolver.js`
-- `.github/workflows/ci.yml`
-- `Dockerfile`
-
-**Importante:** algunos archivos están intencionalmente incompletos o mal configurados para que el candidato los resuelva.
-
----
-
-## Evaluación
-
-Vamos a evaluar:
-
-### CI/CD
-- calidad del pipeline
-- claridad de la automatización
-- manejo de errores
-
-### Infraestructura
-- dockerización
-- deploy strategy
-- rollback
-
-### Observabilidad
-- logs
-- health checks
-- diagnóstico
-
-### Uso de IA
-- cómo usaste IA para analizar incidentes
-- claridad del reporte generado
-- utilidad real del diagnóstico
-
-### Calidad general
-- estructura del repo
-- claridad del código
-- documentación
-
----
-
-## Bonus
-
-Suma puntos si implementás:
-
-- comentario automático en PR con el diagnóstico del incidente
-- clasificación de severidad
-- detección automática de rollback necesario
-- análisis de logs de Docker
-- análisis de logs del deploy
-- detección de errores comunes como puertos, env vars o tests
-
----
-
-## Entrega
-
-1. Forkear este repositorio
-2. Implementar la solución
-3. Enviar el link del repo
-
----
-
-## Tiempo estimado
-
-Entre **2 y 4 horas**.
-
-No es necesario completar todo si el tiempo no alcanza.
-
-Valoramos mucho **explicar decisiones técnicas** en el README.
-# prueba automatizada 20260429_210043
-# prueba automatizada 20260429_210513
-# prueba automatizada 20260429_210950
+- Integración con Grafana Loki para centralizar los logs del pipeline y los reportes de incidentes en un dashboard
+- Caché de imágenes Docker entre runs para acelerar los builds
