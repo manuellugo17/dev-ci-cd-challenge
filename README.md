@@ -183,4 +183,4 @@ El deploy a staging es automático con cada push a `main`.
 ## Mejoras posibles
 
 - Integración con Grafana Loki para centralizar los logs del pipeline y los reportes de incidentes en un dashboard
-- Caché de imágenes Docker entre runs para acelerar los builds
+- Caché de imágenes Docker entre runs para acelerar los builds# prueba automatizada 20260430_112304
