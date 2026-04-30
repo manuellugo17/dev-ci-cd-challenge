@@ -34,15 +34,17 @@ Adopté este modelo en lugar de Gitflow porque es más simple de mantener y refl
 
 ### Test fallando por dependencia de entorno
 
-El endpoint `/health` dependía de la variable de entorno `APP_ENV`.  
-Cuando esta no estaba definida, la API respondía con un estado no saludable.
+El endpoint /health retorna HTTP 500 cuando APP_ENV no está definida.
+El test original no configuraba esa variable, por lo que siempre fallaba
+con "Expected: 200, Received: 500".
 
-Para mejorar el comportamiento en entorno staging, se modificó el endpoint para retornar HTTP 200 con estado `degraded` en lugar de HTTP 500. Esto permite mantener los health checks operativos sin interrumpir el pipeline.
+La solución fue configurar process.env.APP_ENV = 'test' en el beforeAll()
+del archivo de tests, sin modificar la lógica de la aplicación. De esta
+forma el endpoint recibe la variable que necesita y responde correctamente
+con HTTP 200.
 
-Adicionalmente, se configuró `process.env.APP_ENV = 'test'` en el `beforeAll()` de los tests para asegurar un entorno controlado durante la ejecución.
-
-También se agregaron tests adicionales:
-- Verificación de que el campo `env` esté presente en la respuesta
+También se agregaron dos tests adicionales:
+- Verificación de que el campo env esté presente en la respuesta
 - Validación de que rutas inexistentes retornen HTTP 404
 
 ### Dockerfile incompleto
