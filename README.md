@@ -285,3 +285,4 @@ Entre **2 y 4 horas**.
 No es necesario completar todo si el tiempo no alcanza.
 
 Valoramos mucho **explicar decisiones técnicas** en el README.
+# prueba automatizada 20260429_210043
