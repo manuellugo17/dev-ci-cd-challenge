@@ -202,7 +202,7 @@ jobs:
           password: ${{ secrets.MAIL_PASSWORD }}
           to: ${{ secrets.MAIL_TO }}
           from: CI/CD Pipeline <${{ secrets.MAIL_USERNAME }}>
-          subject: "❌ Pipeline falló — Step: ${{ steps.read-report.outputs.STEP_FAILED }} | Severity: ${{ steps.read-report.outputs.SEVERITY }} | Repo: ${{ github.repository }}"
+          subject: "Pipeline fallo — Step: ${{ steps.read-report.outputs.STEP_FAILED }} | Severity: ${{ steps.read-report.outputs.SEVERITY }} | Repo: ${{ github.repository }}"
           body: |
             El pipeline de CI/CD falló en el repositorio ${{ github.repository }}.
 

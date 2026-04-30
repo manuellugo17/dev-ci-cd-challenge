@@ -86,7 +86,7 @@ async function analyze(log) {
         max_tokens: 1024,
         messages: [{
           role: 'user',
-          content: `Sos un especialista en CI/CD. Analizá estos logs de falla y devolvé únicamente un objeto JSON sin texto adicional ni markdown.
+          content: `eres un especialista en CI/CD. Analiza estos logs de falla y devolve unicamente un objeto JSON sin texto adicional ni markdown.
 
 Logs:
 ${log}
@@ -94,12 +94,12 @@ ${log}
 Devolvé exactamente esta estructura con todos los valores en español:
 {
   "step_failed": "nombre del paso en snake_case",
-  "probable_cause": "una o dos oraciones explicando qué salió mal",
+  "probable_cause": "una o dos oraciones explicando qué salio mal",
   "confidence": "high|medium|low",
   "severity": "critical|high|medium|low",
   "suggested_fix": "pasos concretos para resolver el problema",
   "rollback_required": true o false,
-  "recommended_action": "qué hacer a continuación"
+  "recommended_action": "que hacer a continuacion"
 }`
         }]
       })
