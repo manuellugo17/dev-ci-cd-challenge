@@ -287,3 +287,4 @@ No es necesario completar todo si el tiempo no alcanza.
 Valoramos mucho **explicar decisiones técnicas** en el README.
 # prueba automatizada 20260429_210043
 # prueba automatizada 20260429_210513
+# prueba automatizada 20260429_210950
